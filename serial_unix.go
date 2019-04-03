@@ -233,6 +233,10 @@ func nativeOpen(portName string, mode *Mode) (*unixPort, error) {
 func isIODevice(portName string) bool {
 	fd, err := unix.Open(portName, unix.O_RDWR|unix.O_NOCTTY|unix.O_NDELAY, 0)
 	if err != nil {
+		switch err {
+		case unix.EBUSY: // port in use
+			return true
+		}
 		return false
 	}
 	defer unix.Close(fd)
