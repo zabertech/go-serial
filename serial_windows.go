@@ -17,10 +17,17 @@ package serial // import "go.bug.st/serial.v1"
 
 */
 
-import "syscall"
+import (
+	"sync"
+	"syscall"
+)
 
 type windowsPort struct {
-	handle syscall.Handle
+	handle          syscall.Handle
+	writeLock       sync.Mutex
+	writeOverlapped *syscall.Overlapped
+	readLock        sync.Mutex
+	readOverlapped  *syscall.Overlapped
 }
 
 func nativeGetPortsList() ([]string, error) {
@@ -58,64 +65,37 @@ func nativeGetPortsList() ([]string, error) {
 }
 
 func (port *windowsPort) Close() error {
+	if port.writeOverlapped != nil {
+		defer syscall.CloseHandle(port.writeOverlapped.HEvent)
+	}
+	if port.readOverlapped != nil {
+		defer syscall.CloseHandle(port.readOverlapped.HEvent)
+	}
 	return syscall.CloseHandle(port.handle)
 }
 
 func (port *windowsPort) Read(p []byte) (int, error) {
-	var readed uint32
-	params := &dcb{}
-	ev, err := createOverlappedEvent()
-	if err != nil {
-		return 0, err
+	port.readLock.Lock()
+	defer port.readLock.Unlock()
+
+	var bytesRead uint32
+	err := syscall.ReadFile(port.handle, p, &bytesRead, port.readOverlapped)
+	if err == syscall.ERROR_IO_PENDING {
+		err = getOverlappedResult(port.handle, port.readOverlapped, &bytesRead, true)
 	}
-	defer syscall.CloseHandle(ev.HEvent)
-	for {
-		err := syscall.ReadFile(port.handle, p, &readed, ev)
-		switch err {
-		case nil:
-			// operation completed successfully
-		case syscall.ERROR_IO_PENDING:
-			// wait for overlapped I/O to complete
-			if err := getOverlappedResult(port.handle, ev, &readed, true); err != nil {
-				return int(readed), err
-			}
-		default:
-			// error happened
-			return int(readed), err
-		}
-
-		if readed > 0 {
-			return int(readed), nil
-		}
-		if err := resetEvent(ev.HEvent); err != nil {
-			return 0, err
-		}
-
-		// At the moment it seems that the only reliable way to check if
-		// a serial port is alive in Windows is to check if the SetCommState
-		// function fails.
-
-		getCommState(port.handle, params)
-		if err := setCommState(port.handle, params); err != nil {
-			port.Close()
-			return 0, err
-		}
-	}
+	return int(bytesRead), err
 }
 
 func (port *windowsPort) Write(p []byte) (int, error) {
-	var writed uint32
-	ev, err := createOverlappedEvent()
-	if err != nil {
-		return 0, err
-	}
-	defer syscall.CloseHandle(ev.HEvent)
-	err = syscall.WriteFile(port.handle, p, &writed, ev)
+	port.writeLock.Lock()
+	defer port.writeLock.Unlock()
+
+	var bytesWritten uint32
+	err := syscall.WriteFile(port.handle, p, &bytesWritten, port.writeOverlapped)
 	if err == syscall.ERROR_IO_PENDING {
-		// wait for write to complete
-		err = getOverlappedResult(port.handle, ev, &writed, true)
+		err = getOverlappedResult(port.handle, port.writeOverlapped, &bytesWritten, true)
 	}
-	return int(writed), err
+	return int(bytesWritten), err
 }
 
 const (
@@ -389,6 +369,18 @@ func nativeOpen(portName string, mode *Mode) (*windowsPort, error) {
 		handle: handle,
 	}
 
+	port.writeOverlapped, err = createOverlappedEvent()
+	if err != nil {
+		port.Close()
+		return nil, &PortError{code: InvalidSerialPort}
+	}
+
+	port.readOverlapped, err = createOverlappedEvent()
+	if err != nil {
+		port.Close()
+		return nil, &PortError{code: InvalidSerialPort}
+	}
+
 	// Set port parameters
 	if port.SetMode(mode) != nil {
 		port.Close()
@@ -422,13 +414,10 @@ func nativeOpen(portName string, mode *Mode) (*windowsPort, error) {
 		return nil, &PortError{code: InvalidSerialPort}
 	}
 
-	// Set timeouts to 1 second
 	timeouts := &commTimeouts{
-		ReadIntervalTimeout:         0xFFFFFFFF,
-		ReadTotalTimeoutMultiplier:  0xFFFFFFFF,
-		ReadTotalTimeoutConstant:    1000, // 1 sec
-		WriteTotalTimeoutConstant:   0,
-		WriteTotalTimeoutMultiplier: 0,
+		ReadIntervalTimeout:        0xFFFFFFFF,
+		ReadTotalTimeoutMultiplier: 0xFFFFFFFF,
+		ReadTotalTimeoutConstant:   0xFFFFFFFF - 1,
 	}
 	if setCommTimeouts(port.handle, timeouts) != nil {
 		port.Close()
