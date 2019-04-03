@@ -23,39 +23,67 @@ import (
 type unixPort struct {
 	handle int
 
-	closeLock   sync.RWMutex
+	readLock    sync.Mutex
+	closeLock   sync.Mutex
 	closeSignal *unixutils.Pipe
-	opened      bool
+	isClosed    bool
 }
 
 func (port *unixPort) Close() error {
-	// Close port
-	port.releaseExclusiveAccess()
-	if err := unix.Close(port.handle); err != nil {
+	if err := port.closeFD(); err != nil {
 		return err
 	}
-	port.opened = false
-
-	if port.closeSignal != nil {
-		// Send close signal to all pending reads (if any)
-		port.closeSignal.Write([]byte{0})
-
-		// Wait for all readers to complete
-		port.closeLock.Lock()
-		defer port.closeLock.Unlock()
-
-		// Close signaling pipe
-		if err := port.closeSignal.Close(); err != nil {
-			return err
-		}
-	}
+	_ = port.sendCloseSignal()
 	return nil
 }
 
+func (port *unixPort) closeFD() error {
+	port.closeLock.Lock()
+	defer port.closeLock.Unlock()
+
+	if port.isClosed {
+		return &PortError{code: PortClosed}
+	}
+
+	_ = port.releaseExclusiveAccess()
+	if err := unix.Close(port.handle); err != nil {
+		return err
+	}
+
+	port.isClosed = true
+	return nil
+}
+
+func (port *unixPort) checkClosed() bool {
+	port.closeLock.Lock()
+	defer port.closeLock.Unlock()
+
+	return port.isClosed
+}
+
+func (port *unixPort) sendCloseSignal() error {
+	if port.closeSignal == nil {
+		return nil
+	}
+
+	// Send close signal to pending read (if there is one)
+	if _, err := port.closeSignal.Write([]byte{0}); err != nil {
+		return err
+	}
+
+	// Wait for reader to complete
+	port.readLock.Lock()
+	port.readLock.Unlock()
+
+	// Close signaling pipe
+	return port.closeSignal.Close()
+}
+
 func (port *unixPort) Read(p []byte) (n int, err error) {
-	port.closeLock.RLock()
-	defer port.closeLock.RUnlock()
-	if !port.opened {
+	port.readLock.Lock()
+	defer port.readLock.Unlock()
+
+	if port.checkClosed() {
 		return 0, &PortError{code: PortClosed}
 	}
 
@@ -162,7 +190,6 @@ func nativeOpen(portName string, mode *Mode) (*unixPort, error) {
 	}
 	port := &unixPort{
 		handle: h,
-		opened: true,
 	}
 
 	// Setup serial port
@@ -188,9 +215,9 @@ func nativeOpen(portName string, mode *Mode) (*unixPort, error) {
 		return nil, &PortError{code: InvalidSerialPort}
 	}
 
-	unix.SetNonblock(h, false)
+	_ = unix.SetNonblock(h, false)
 
-	port.acquireExclusiveAccess()
+	_ = port.acquireExclusiveAccess()
 
 	// This pipe is used as a signal to cancel blocking Read
 	pipe := &unixutils.Pipe{}
@@ -201,6 +228,21 @@ func nativeOpen(portName string, mode *Mode) (*unixPort, error) {
 	port.closeSignal = pipe
 
 	return port, nil
+}
+
+func isIODevice(portName string) bool {
+	fd, err := unix.Open(portName, unix.O_RDWR|unix.O_NOCTTY|unix.O_NDELAY, 0)
+	if err != nil {
+		return false
+	}
+	defer unix.Close(fd)
+
+	settings := &unix.Termios{}
+	if err := ioctl(fd, ioctlTcgetattr, uintptr(unsafe.Pointer(settings))); err != nil {
+		return false
+	}
+
+	return true
 }
 
 func nativeGetPortsList() ([]string, error) {
@@ -229,14 +271,8 @@ func nativeGetPortsList() ([]string, error) {
 
 		// Check if serial port is real or is a placeholder serial port "ttySxx"
 		if strings.HasPrefix(f.Name(), "ttyS") {
-			port, err := nativeOpen(portName, &Mode{})
-			if err != nil {
-				serr, ok := err.(*PortError)
-				if ok && serr.Code() == InvalidSerialPort {
-					continue
-				}
-			} else {
-				port.Close()
+			if !isIODevice(portName) {
+				continue
 			}
 		}
 
