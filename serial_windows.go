@@ -71,6 +71,18 @@ func (port *windowsPort) Close() error {
 	if port.readOverlapped != nil {
 		defer syscall.CloseHandle(port.readOverlapped.HEvent)
 	}
+
+	// implementation inspired by
+	// https://referencesource.microsoft.com/#system/sys/system/io/ports/SerialPort.cs
+	// Unless the code below is executed the CloseHandle does not close the port properly.
+	// Port closes itself eventually, but immediate opening results in Busy status
+
+	_ = syscall.FlushFileBuffers(port.handle)
+	_ = purgeComm(port.handle, purgeRxClear|purgeRxAbort|purgeTxClear|purgeTxAbort)
+
+	// this interruption is essential to prevent the issue
+	_, _ = syscall.WaitForSingleObject(port.handle, 1)
+
 	return syscall.CloseHandle(port.handle)
 }
 
