@@ -178,7 +178,7 @@ func (port *unixPort) GetModemStatusBits() (*ModemStatusBits, error) {
 }
 
 func nativeOpen(portName string, mode *Mode) (*unixPort, error) {
-	h, err := unix.Open(portName, unix.O_RDWR|unix.O_NOCTTY|unix.O_NDELAY, 0)
+	handle, err := unix.Open(portName, unix.O_RDWR|unix.O_NOCTTY|unix.O_NDELAY, 0)
 	if err != nil {
 		switch err {
 		case unix.EBUSY:
@@ -189,8 +189,15 @@ func nativeOpen(portName string, mode *Mode) (*unixPort, error) {
 		return nil, err
 	}
 	port := &unixPort{
-		handle: h,
+		handle: handle,
 	}
+
+	if err := unix.Flock(handle, unix.LOCK_EX|unix.LOCK_NB); err == unix.EWOULDBLOCK {
+		port.Close()
+		return nil, &PortError{code: PortBusy}
+	}
+
+	_ = port.acquireExclusiveAccess()
 
 	// Setup serial port
 	if port.SetMode(mode) != nil {
@@ -215,9 +222,7 @@ func nativeOpen(portName string, mode *Mode) (*unixPort, error) {
 		return nil, &PortError{code: InvalidSerialPort}
 	}
 
-	_ = unix.SetNonblock(h, false)
-
-	_ = port.acquireExclusiveAccess()
+	_ = unix.SetNonblock(handle, false)
 
 	// This pipe is used as a signal to cancel blocking Read
 	pipe := &unixutils.Pipe{}
