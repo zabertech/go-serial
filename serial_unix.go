@@ -87,14 +87,19 @@ func (port *unixPort) Read(p []byte) (n int, err error) {
 		return 0, &PortError{code: PortClosed}
 	}
 
-	fds := unixutils.NewFDSet(port.handle, port.closeSignal.ReadFD())
-	res, err := unixutils.Select(fds, nil, fds, -1)
+	closeSignalFD := port.closeSignal.ReadFD()
+	fds := unixutils.NewFDSet(port.handle, closeSignalFD)
+	var selectResult *unixutils.FDResultSets
+	for repeat := true; repeat; repeat = err == unix.EINTR {
+		selectResult, err = unixutils.Select(fds, nil, fds, -1)
+	}
 	if err != nil {
 		return 0, err
 	}
-	if res.IsReadable(port.closeSignal.ReadFD()) {
+	if selectResult.IsReadable(closeSignalFD) {
 		return 0, &PortError{code: PortClosed}
 	}
+
 	n, err = unix.Read(port.handle, p)
 	if n < 0 {
 		n = 0
