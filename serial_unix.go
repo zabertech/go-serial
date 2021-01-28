@@ -79,7 +79,7 @@ func (port *unixPort) sendCloseSignal() error {
 	return port.closeSignal.Close()
 }
 
-func (port *unixPort) Read(p []byte) (n int, err error) {
+func (port *unixPort) Read(buffer []byte) (int, error) {
 	port.readLock.Lock()
 	defer port.readLock.Unlock()
 
@@ -89,7 +89,9 @@ func (port *unixPort) Read(p []byte) (n int, err error) {
 
 	closeSignalFD := port.closeSignal.ReadFD()
 	fds := unixutils.NewFDSet(port.handle, closeSignalFD)
+
 	var selectResult *unixutils.FDResultSets
+	var err error
 	for repeat := true; repeat; repeat = err == unix.EINTR {
 		selectResult, err = unixutils.Select(fds, nil, fds, -1)
 	}
@@ -100,19 +102,19 @@ func (port *unixPort) Read(p []byte) (n int, err error) {
 		return 0, &PortError{code: PortClosed}
 	}
 
-	n, err = unix.Read(port.handle, p)
-	if n < 0 {
-		n = 0
+	bytesRead, err := unix.Read(port.handle, buffer)
+	if bytesRead < 0 {
+		bytesRead = 0
 	}
-	return
+	return bytesRead, err
 }
 
-func (port *unixPort) Write(p []byte) (n int, err error) {
-	n, err = unix.Write(port.handle, p)
-	if n < 0 {
-		n = 0
+func (port *unixPort) Write(buffer []byte) (int, error) {
+	bytesWritten, err := unix.Write(port.handle, buffer)
+	if bytesWritten < 0 {
+		bytesWritten = 0
 	}
-	return
+	return bytesWritten, err
 }
 
 func (port *unixPort) ResetInputBuffer() error {
