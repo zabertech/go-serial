@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/martinzak-zaber/go-serial/unixutils"
+	"github.com/zabertech/go-serial/unixutils"
 )
 
 type unixPort struct {

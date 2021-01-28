@@ -6,9 +6,12 @@
 
 package enumerator_test
 
-import "fmt"
-import "log"
-import "github.com/martinzak-zaber/go-serial/enumerator"
+import (
+	"fmt"
+	"log"
+
+	"github.com/zabertech/go-serial/enumerator"
+)
 
 func ExampleGetDetailedPortsList() {
 	ports, err := enumerator.GetDetailedPortsList()

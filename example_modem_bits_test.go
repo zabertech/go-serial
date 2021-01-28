@@ -6,10 +6,13 @@
 
 package serial_test
 
-import "log"
-import "github.com/martinzak-zaber/go-serial"
-import "fmt"
-import "time"
+import (
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/zabertech/go-serial"
+)
 
 func ExampleGetSetModemBits() {
 	// Open the first serial port detected at 9600bps N81

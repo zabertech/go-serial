@@ -6,9 +6,12 @@
 
 package serial_test
 
-import "fmt"
-import "log"
-import "github.com/martinzak-zaber/go-serial"
+import (
+	"fmt"
+	"log"
+
+	"github.com/zabertech/go-serial"
+)
 
 func ExampleSerialPort_SetMode() {
 	port, err := serial.Open("/dev/ttyACM0", &serial.Mode{})
