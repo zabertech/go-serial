@@ -427,9 +427,11 @@ func nativeOpen(portName string, mode *Mode) (*windowsPort, error) {
 	}
 
 	timeouts := &commTimeouts{
-		ReadIntervalTimeout:        0xFFFFFFFF,
-		ReadTotalTimeoutMultiplier: 0xFFFFFFFF,
-		ReadTotalTimeoutConstant:   0xFFFFFFFF - 1,
+		ReadIntervalTimeout:         0xFFFFFFFF,
+		ReadTotalTimeoutMultiplier:  0xFFFFFFFF,
+		ReadTotalTimeoutConstant:    0xFFFFFFFF - 1,
+		WriteTotalTimeoutConstant:   10000,
+		WriteTotalTimeoutMultiplier: 0,
 	}
 	if setCommTimeouts(port.handle, timeouts) != nil {
 		port.Close()
