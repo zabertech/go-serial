@@ -72,6 +72,8 @@ func (port *windowsPort) Close() error {
 		defer syscall.CloseHandle(port.readOverlapped.HEvent)
 	}
 
+	_ = syscall.CancelIoEx(port.handle, nil)
+
 	// implementation inspired by
 	// https://referencesource.microsoft.com/#system/sys/system/io/ports/SerialPort.cs
 	// Unless the code below is executed the CloseHandle does not close the port properly.
