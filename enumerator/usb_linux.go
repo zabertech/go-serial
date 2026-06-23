@@ -1,5 +1,5 @@
 //
-// Copyright 2014-2017 Cristian Maglie. All rights reserved.
+// Copyright 2014-2026 Cristian Maglie. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 //
@@ -9,8 +9,10 @@ package enumerator
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/zabertech/go-serial"
 )
@@ -76,21 +78,14 @@ func parseUSBSysFS(usbDevicePath string, details *PortDetails) error {
 	if err != nil {
 		return err
 	}
-	//manufacturer, err := readLine(filepath.Join(usbDevicePath, "manufacturer"))
-	//if err != nil {
-	//	return err
-	//}
-	//product, err := readLine(filepath.Join(usbDevicePath, "product"))
-	//if err != nil {
-	//	return err
-	//}
 
 	details.IsUSB = true
-	details.VID = vid
-	details.PID = pid
+	// sysfs reports idVendor/idProduct in lowercase hex; the darwin and Windows
+	// backends report them uppercase. Normalize to uppercase so VID/PID are
+	// consistent across platforms.
+	details.VID = strings.ToUpper(vid)
+	details.PID = strings.ToUpper(pid)
 	details.SerialNumber = serial
-	//details.Manufacturer = manufacturer
-	//details.Product = product
 	return nil
 }
 
@@ -105,5 +100,12 @@ func readLine(filename string) (string, error) {
 	defer file.Close()
 	reader := bufio.NewReader(file)
 	line, _, err := reader.ReadLine()
+	if err == io.EOF {
+		// An empty sysfs attribute file (e.g. an empty "serial",
+		// "manufacturer" or "product") yields io.EOF with no data.
+		// Treat it as an empty value, not an error, so a single device
+		// with a blank attribute does not abort the whole enumeration.
+		return "", nil
+	}
 	return string(line), err
 }
