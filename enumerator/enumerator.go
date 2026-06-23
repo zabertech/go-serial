@@ -4,9 +4,9 @@
 // license that can be found in the LICENSE file.
 //
 
-package enumerator // import "go.bug.st/serial.v1/enumerator"
+package enumerator
 
-//go:generate go run $GOROOT/src/syscall/mksyscall_windows.go -output syscall_windows.go usb_windows.go
+//go:generate go run golang.org/x/sys/windows/mkwinsyscall -output syscall_windows.go usb_windows.go
 
 // PortDetails contains detailed information about USB serial port.
 // Use GetDetailedPortsList function to retrieve it.
