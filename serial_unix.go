@@ -4,12 +4,12 @@
 // license that can be found in the LICENSE file.
 //
 
-// +build linux darwin freebsd openbsd
+//go:build linux || darwin || freebsd || openbsd
 
-package serial // import "go.bug.st/serial.v1"
+package serial
 
 import (
-	"io/ioutil"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -262,7 +262,7 @@ func isIODevice(portName string) bool {
 }
 
 func nativeGetPortsList() ([]string, error) {
-	files, err := ioutil.ReadDir(devFolder)
+	files, err := os.ReadDir(devFolder)
 	if err != nil {
 		return nil, err
 	}
