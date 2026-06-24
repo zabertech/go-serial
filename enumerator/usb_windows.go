@@ -1,5 +1,5 @@
 //
-// Copyright 2014-2017 Cristian Maglie. All rights reserved.
+// Copyright 2014-2026 Cristian Maglie. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 //
@@ -18,7 +18,7 @@ import (
 func parseDeviceID(deviceID string, details *PortDetails) {
 	// Windows stock USB-CDC driver
 	if len(deviceID) >= 3 && deviceID[:3] == "USB" {
-		re := regexp.MustCompile("VID_(....)&PID_(....)(\\\\(\\w+)$)?").FindAllStringSubmatch(deviceID, -1)
+		re := regexp.MustCompile(`VID_(....)&PID_(....)(\\(\w+)$)?`).FindAllStringSubmatch(deviceID, -1)
 		if re == nil || len(re[0]) < 2 {
 			// Silently ignore unparsable strings
 			return
@@ -34,7 +34,7 @@ func parseDeviceID(deviceID string, details *PortDetails) {
 
 	// FTDI driver
 	if len(deviceID) >= 7 && deviceID[:7] == "FTDIBUS" {
-		re := regexp.MustCompile("VID_(....)\\+PID_(....)(\\+(\\w+))?").FindAllStringSubmatch(deviceID, -1)
+		re := regexp.MustCompile(`VID_(....)\+PID_(....)(\+(\w+))?`).FindAllStringSubmatch(deviceID, -1)
 		if re == nil || len(re[0]) < 2 {
 			// Silently ignore unparsable strings
 			return
@@ -54,197 +54,82 @@ func parseDeviceID(deviceID string, details *PortDetails) {
 // setupapi based
 // --------------
 
-//sys setupDiClassGuidsFromNameInternal(class string, guid *guid, guidSize uint32, requiredSize *uint32) (err error) = setupapi.SetupDiClassGuidsFromNameW
-//sys setupDiGetClassDevs(guid *guid, enumerator *string, hwndParent uintptr, flags uint32) (set devicesSet, err error) = setupapi.SetupDiGetClassDevsW
-//sys setupDiDestroyDeviceInfoList(set devicesSet) (err error) = setupapi.SetupDiDestroyDeviceInfoList
-//sys setupDiEnumDeviceInfo(set devicesSet, index uint32, info *devInfoData) (err error) = setupapi.SetupDiEnumDeviceInfo
-//sys setupDiGetDeviceInstanceId(set devicesSet, devInfo *devInfoData, devInstanceId unsafe.Pointer, devInstanceIdSize uint32, requiredSize *uint32) (err error) = setupapi.SetupDiGetDeviceInstanceIdW
-//sys setupDiOpenDevRegKey(set devicesSet, devInfo *devInfoData, scope dicsScope, hwProfile uint32, keyType uint32, samDesired regsam) (hkey syscall.Handle, err error) = setupapi.SetupDiOpenDevRegKey
-//sys setupDiGetDeviceRegistryProperty(set devicesSet, devInfo *devInfoData, property deviceProperty, propertyType *uint32, outValue *byte, outSize *uint32, reqSize *uint32) (res bool) = setupapi.SetupDiGetDeviceRegistryPropertyW
+//sys setupDiGetClassDevs(guid *windows.GUID, enumerator *string, hwndParent uintptr, flags windows.DIGCF) (set windows.DevInfo, err error) = setupapi.SetupDiGetClassDevsW
+//sys setupDiDestroyDeviceInfoList(set windows.DevInfo) (err error) = setupapi.SetupDiDestroyDeviceInfoList
+//sys setupDiOpenDevRegKey(set windows.DevInfo, devInfo *windows.DevInfoData, scope windows.DICS_FLAG, hwProfile uint32, keyType windows.DIREG, samDesired uint32) (hkey syscall.Handle, err error) = setupapi.SetupDiOpenDevRegKey
 
-// Device registry property codes
-// (Codes marked as read-only (R) may only be used for
-// SetupDiGetDeviceRegistryProperty)
-//
-// These values should cover the same set of registry properties
-// as defined by the CM_DRP codes in cfgmgr32.h.
-//
-// Note that SPDRP codes are zero based while CM_DRP codes are one based!
-type deviceProperty uint32
+//sys cmGetParent(outParentDev *windows.DEVINST, dev windows.DEVINST, flags uint32) (cmErr cmError) = cfgmgr32.CM_Get_Parent
+//sys cmGetDeviceIDSize(outLen *uint32, dev windows.DEVINST, flags uint32) (cmErr cmError) = cfgmgr32.CM_Get_Device_ID_Size
+//sys cmGetDeviceID(dev windows.DEVINST, buffer unsafe.Pointer, bufferSize uint32, flags uint32) (err cmError) = cfgmgr32.CM_Get_Device_IDW
+//sys cmMapCrToWin32Err(cmErr cmError, defaultErr uint32) (err uint32) = cfgmgr32.CM_MapCrToWin32Err
 
-const (
-	spdrpDeviceDesc               deviceProperty = 0x00000000 // DeviceDesc = R/W
-	spdrpHardwareID                              = 0x00000001 // HardwareID = R/W
-	spdrpCompatibleIDS                           = 0x00000002 // CompatibleIDs = R/W
-	spdrpUnused0                                 = 0x00000003 // Unused
-	spdrpService                                 = 0x00000004 // Service = R/W
-	spdrpUnused1                                 = 0x00000005 // Unused
-	spdrpUnused2                                 = 0x00000006 // Unused
-	spdrpClass                                   = 0x00000007 // Class = R--tied to ClassGUID
-	spdrpClassGUID                               = 0x00000008 // ClassGUID = R/W
-	spdrpDriver                                  = 0x00000009 // Driver = R/W
-	spdrpConfigFlags                             = 0x0000000A // ConfigFlags = R/W
-	spdrpMFG                                     = 0x0000000B // Mfg = R/W
-	spdrpFriendlyName                            = 0x0000000C // FriendlyName = R/W
-	spdrpLocationIinformation                    = 0x0000000D // LocationInformation = R/W
-	spdrpPhysicalDeviceObjectName                = 0x0000000E // PhysicalDeviceObjectName = R
-	spdrpCapabilities                            = 0x0000000F // Capabilities = R
-	spdrpUINumber                                = 0x00000010 // UiNumber = R
-	spdrpUpperFilters                            = 0x00000011 // UpperFilters = R/W
-	spdrpLowerFilters                            = 0x00000012 // LowerFilters = R/W
-	spdrpBusTypeGUID                             = 0x00000013 // BusTypeGUID = R
-	spdrpLegactBusType                           = 0x00000014 // LegacyBusType = R
-	spdrpBusNumber                               = 0x00000015 // BusNumber = R
-	spdrpEnumeratorName                          = 0x00000016 // Enumerator Name = R
-	spdrpSecurity                                = 0x00000017 // Security = R/W, binary form
-	spdrpSecuritySDS                             = 0x00000018 // Security = W, SDS form
-	spdrpDevType                                 = 0x00000019 // Device Type = R/W
-	spdrpExclusive                               = 0x0000001A // Device is exclusive-access = R/W
-	spdrpCharacteristics                         = 0x0000001B // Device Characteristics = R/W
-	spdrpAddress                                 = 0x0000001C // Device Address = R
-	spdrpUINumberDescFormat                      = 0X0000001D // UiNumberDescFormat = R/W
-	spdrpDevicePowerData                         = 0x0000001E // Device Power Data = R
-	spdrpRemovalPolicy                           = 0x0000001F // Removal Policy = R
-	spdrpRemovalPolicyHWDefault                  = 0x00000020 // Hardware Removal Policy = R
-	spdrpRemovalPolicyOverride                   = 0x00000021 // Removal Policy Override = RW
-	spdrpInstallState                            = 0x00000022 // Device Install State = R
-	spdrpLocationPaths                           = 0x00000023 // Device Location Paths = R
-	spdrpBaseContainerID                         = 0x00000024 // Base ContainerID = R
+type cmError uint32
 
-	spdrpMaximumProperty = 0x00000025 // Upper bound on ordinals
-)
-
-// Values specifying the scope of a device property change
-type dicsScope uint32
-
-const (
-	dicsFlagGlobal          dicsScope = 0x00000001 // make change in all hardware profiles
-	dicsFlagConfigSspecific           = 0x00000002 // make change in specified profile only
-	dicsFlagConfigGeneral             = 0x00000004 // 1 or more hardware profile-specific
-)
-
-// https://msdn.microsoft.com/en-us/library/windows/desktop/ms724878(v=vs.85).aspx
-type regsam uint32
-
-const (
-	keyAllAccess        regsam = 0xF003F
-	keyCreateLink              = 0x00020
-	keyCreateSubKey            = 0x00004
-	keyEnumerateSubKeys        = 0x00008
-	keyExecute                 = 0x20019
-	keyNotify                  = 0x00010
-	keyQueryValue              = 0x00001
-	keyRead                    = 0x20019
-	keySetValue                = 0x00002
-	keyWOW64_32key             = 0x00200
-	keyWOW64_64key             = 0x00100
-	keyWrite                   = 0x20006
-)
-
-// KeyType values for SetupDiCreateDevRegKey, SetupDiOpenDevRegKey, and
-// SetupDiDeleteDevRegKey.
-const (
-	diregDev  = 0x00000001 // Open/Create/Delete device key
-	diregDrv  = 0x00000002 // Open/Create/Delete driver key
-	diregBoth = 0x00000004 // Delete both driver and Device key
-)
-
-// https://msdn.microsoft.com/it-it/library/windows/desktop/aa373931(v=vs.85).aspx
-type guid struct {
-	data1 uint32
-	data2 uint16
-	data3 uint16
-	data4 [8]byte
-}
-
-func (g guid) String() string {
-	return fmt.Sprintf("%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-		g.data1, g.data2, g.data3,
-		g.data4[0], g.data4[1], g.data4[2], g.data4[3],
-		g.data4[4], g.data4[5], g.data4[6], g.data4[7])
-}
-
-func classGuidsFromName(className string) ([]guid, error) {
-	// Determine the number of GUIDs for className
-	n := uint32(0)
-	if err := setupDiClassGuidsFromNameInternal(className, nil, 0, &n); err != nil {
-		// ignore error: UIDs array size too small
+func cmConvertError(cmErr cmError) error {
+	if cmErr == 0 {
+		return nil
 	}
-
-	res := make([]guid, n)
-	err := setupDiClassGuidsFromNameInternal(className, &res[0], n, &n)
-	return res, err
+	winErr := cmMapCrToWin32Err(cmErr, 0)
+	return fmt.Errorf("error %d", winErr)
 }
 
-const (
-	digcfDefault         = 0x00000001 // only valid with digcfDeviceInterface
-	digcfPresent         = 0x00000002
-	digcfAllClasses      = 0x00000004
-	digcfProfile         = 0x00000008
-	digcfDeviceInterface = 0x00000010
-)
-
-type devicesSet syscall.Handle
-
-func (g *guid) getDevicesSet() (devicesSet, error) {
-	return setupDiGetClassDevs(g, nil, 0, digcfPresent)
+func getParent(dev windows.DEVINST) (windows.DEVINST, error) {
+	var res windows.DEVINST
+	cmErr := cmGetParent(&res, dev, 0)
+	return res, cmConvertError(cmErr)
 }
 
-func (set devicesSet) destroy() {
-	setupDiDestroyDeviceInfoList(set)
-}
-
-// https://msdn.microsoft.com/en-us/library/windows/hardware/ff552344(v=vs.85).aspx
-type devInfoData struct {
-	size     uint32
-	guid     guid
-	devInst  uint32
-	reserved uintptr
-}
-
-type deviceInfo struct {
-	set  devicesSet
-	data devInfoData
-}
-
-func (set devicesSet) getDeviceInfo(index int) (*deviceInfo, error) {
-	result := &deviceInfo{set: set}
-
-	result.data.size = uint32(unsafe.Sizeof(result.data))
-	err := setupDiEnumDeviceInfo(set, uint32(index), &result.data)
-	return result, err
-}
-
-func (dev *deviceInfo) getInstanceID() (string, error) {
-	n := uint32(0)
-	setupDiGetDeviceInstanceId(dev.set, &dev.data, nil, 0, &n)
-	buff := make([]uint16, n)
-	if err := setupDiGetDeviceInstanceId(dev.set, &dev.data, unsafe.Pointer(&buff[0]), uint32(len(buff)), &n); err != nil {
+func getDeviceID(dev windows.DEVINST) (string, error) {
+	var size uint32
+	cmErr := cmGetDeviceIDSize(&size, dev, 0)
+	if err := cmConvertError(cmErr); err != nil {
+		return "", err
+	}
+	buff := make([]uint16, size)
+	cmErr = cmGetDeviceID(dev, unsafe.Pointer(&buff[0]), uint32(len(buff)), 0)
+	if err := cmConvertError(cmErr); err != nil {
 		return "", err
 	}
 	return windows.UTF16ToString(buff[:]), nil
 }
 
-func (dev *deviceInfo) openDevRegKey(scope dicsScope, hwProfile uint32, keyType uint32, samDesired regsam) (syscall.Handle, error) {
-	return setupDiOpenDevRegKey(dev.set, &dev.data, scope, hwProfile, keyType, samDesired)
+type deviceInfo struct {
+	set  windows.DevInfo
+	data *windows.DevInfoData
+}
+
+func getDeviceInfo(set windows.DevInfo, index int) (*deviceInfo, error) {
+	data, err := windows.SetupDiEnumDeviceInfo(set, index)
+	if err != nil {
+		return nil, err
+	}
+	return &deviceInfo{set: set, data: data}, nil
+}
+
+func (dev *deviceInfo) getInstanceID() (string, error) {
+	return windows.SetupDiGetDeviceInstanceId(dev.set, dev.data)
+}
+
+func (dev *deviceInfo) openDevRegKey(scope windows.DICS_FLAG, hwProfile uint32, keyType windows.DIREG, samDesired uint32) (syscall.Handle, error) {
+	return setupDiOpenDevRegKey(dev.set, dev.data, scope, hwProfile, keyType, samDesired)
 }
 
 func nativeGetDetailedPortsList() ([]*PortDetails, error) {
-	guids, err := classGuidsFromName("Ports")
+	guids, err := windows.SetupDiClassGuidsFromNameEx("Ports", "")
 	if err != nil {
 		return nil, &PortEnumerationError{causedBy: err}
 	}
 
 	var res []*PortDetails
 	for _, g := range guids {
-		devsSet, err := g.getDevicesSet()
+		devsSet, err := setupDiGetClassDevs(&g, nil, 0, windows.DIGCF_PRESENT)
 		if err != nil {
 			return nil, &PortEnumerationError{causedBy: err}
 		}
-		defer devsSet.destroy()
+		defer setupDiDestroyDeviceInfoList(devsSet)
 
 		for i := 0; ; i++ {
-			device, err := devsSet.getDeviceInfo(i)
+			device, err := getDeviceInfo(devsSet, i)
 			if err != nil {
 				break
 			}
@@ -269,7 +154,7 @@ func nativeGetDetailedPortsList() ([]*PortDetails, error) {
 }
 
 func retrievePortNameFromDevInfo(device *deviceInfo) (string, error) {
-	h, err := device.openDevRegKey(dicsFlagGlobal, 0, diregDev, keyRead)
+	h, err := device.openDevRegKey(windows.DICS_FLAG_GLOBAL, 0, windows.DIREG_DEV, windows.KEY_READ)
 	if err != nil {
 		return "", err
 	}
@@ -291,11 +176,18 @@ func retrievePortDetailsFromDevInfo(device *deviceInfo, details *PortDetails) er
 	}
 	parseDeviceID(deviceID, details)
 
-	var friendlyName [1024]uint16
-	friendlyNameP := (*byte)(unsafe.Pointer(&friendlyName[0]))
-	friendlyNameSize := uint32(len(friendlyName) * 2)
-	if setupDiGetDeviceRegistryProperty(device.set, &device.data, spdrpDeviceDesc /* spdrpFriendlyName */, nil, friendlyNameP, &friendlyNameSize, nil) {
-		//details.Product = syscall.UTF16ToString(friendlyName[:])
+	// On composite USB devices the serial number is usually reported on the parent
+	// device, so let's navigate up one level and see if we can get this information
+	if details.IsUSB && details.SerialNumber == "" {
+		if parentInfo, err := getParent(device.data.DevInst); err == nil {
+			if parentDeviceID, err := getDeviceID(parentInfo); err == nil {
+				d := &PortDetails{}
+				parseDeviceID(parentDeviceID, d)
+				if details.VID == d.VID && details.PID == d.PID {
+					details.SerialNumber = d.SerialNumber
+				}
+			}
+		}
 	}
 
 	return nil
