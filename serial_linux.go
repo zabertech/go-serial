@@ -60,9 +60,19 @@ const tcIUCLC = unix.IUCLC
 
 const tcCRTSCTS uint32 = unix.CRTSCTS
 
+// tcCBAUD is the mask of the baudrate bits in Cflag
+const tcCBAUD uint32 = unix.CBAUD
+
 const ioctlTcgetattr = unix.TCGETS
 const ioctlTcsetattr = unix.TCSETS
 const ioctlTcflsh = unix.TCFLSH
+
+// Only the baudrates in baudrateMap are supported
+const customBaudrateSupported = false
+
+func (port *unixPort) setCustomBaudrate(speed int) error {
+	return &PortError{code: InvalidSpeed}
+}
 
 func toTermiosSpeedType(speed uint32) uint32 {
 	return speed

@@ -27,6 +27,10 @@ type unixPort struct {
 	closeLock   sync.Mutex
 	closeSignal *unixutils.Pipe
 	isClosed    bool
+
+	// customBaudrate is the baudrate set with setCustomBaudrate after every
+	// termios update, or 0 if a standard baudrate is used
+	customBaudrate int
 }
 
 func (port *unixPort) Close() error {
@@ -130,7 +134,8 @@ func (port *unixPort) SetMode(mode *Mode) error {
 	if err != nil {
 		return err
 	}
-	if err := setTermSettingsBaudrate(mode.BaudRate, settings); err != nil {
+	customBaudrate, err := setTermSettingsBaudrate(mode.BaudRate, settings)
+	if err != nil {
 		return err
 	}
 	if err := setTermSettingsParity(mode.Parity, settings); err != nil {
@@ -141,6 +146,11 @@ func (port *unixPort) SetMode(mode *Mode) error {
 	}
 	if err := setTermSettingsStopBits(mode.StopBits, settings); err != nil {
 		return err
+	}
+	if customBaudrate {
+		port.customBaudrate = mode.BaudRate
+	} else {
+		port.customBaudrate = 0
 	}
 	return port.setTermSettings(settings)
 }
@@ -301,20 +311,30 @@ func nativeGetPortsList() ([]string, error) {
 
 // termios manipulation functions
 
-func setTermSettingsBaudrate(speed int, settings *unix.Termios) error {
+// customBaudratePlaceholder is the standard baudrate written with the termios
+// ioctl when a custom baudrate is in use
+const customBaudratePlaceholder = 9600
+
+// setTermSettingsBaudrate sets the requested baudrate in settings. If the
+// baudrate is not a standard one but the platform supports custom baudrates,
+// a placeholder baudrate is set and custom is true: the caller must then apply
+// the real baudrate with setCustomBaudrate after updating the termios.
+func setTermSettingsBaudrate(speed int, settings *unix.Termios) (custom bool, err error) {
 	baudrate, ok := baudrateMap[speed]
 	if !ok {
-		return &PortError{code: InvalidSpeed}
+		if !customBaudrateSupported || speed <= 0 {
+			return false, &PortError{code: InvalidSpeed}
+		}
+		baudrate = baudrateMap[customBaudratePlaceholder]
+		custom = true
 	}
 	// revert old baudrate
-	for _, rate := range baudrateMap {
-		settings.Cflag &^= rate
-	}
+	settings.Cflag &^= tcCBAUD
 	// set new baudrate
-	settings.Cflag |= baudrate
+	settings.Cflag |= baudrate & tcCBAUD
 	settings.Ispeed = toTermiosSpeedType(baudrate)
 	settings.Ospeed = toTermiosSpeedType(baudrate)
-	return nil
+	return custom, nil
 }
 
 func setTermSettingsParity(parity Parity, settings *unix.Termios) error {
@@ -437,7 +457,19 @@ func (port *unixPort) getTermSettings() (*unix.Termios, error) {
 }
 
 func (port *unixPort) setTermSettings(settings *unix.Termios) error {
-	return ioctl(port.handle, ioctlTcsetattr, uintptr(unsafe.Pointer(settings)))
+	if port.customBaudrate == 0 {
+		return ioctl(port.handle, ioctlTcsetattr, uintptr(unsafe.Pointer(settings)))
+	}
+	// The custom baudrate read back from the port may be rejected by the
+	// termios ioctl, and is reset by it anyway: set a placeholder, then
+	// re-apply the custom baudrate.
+	if _, err := setTermSettingsBaudrate(customBaudratePlaceholder, settings); err != nil {
+		return err
+	}
+	if err := ioctl(port.handle, ioctlTcsetattr, uintptr(unsafe.Pointer(settings))); err != nil {
+		return err
+	}
+	return port.setCustomBaudrate(port.customBaudrate)
 }
 
 func (port *unixPort) getModemBitsStatus() (int, error) {
