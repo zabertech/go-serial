@@ -396,9 +396,9 @@ func nativeOpen(portName string, mode *Mode) (*windowsPort, error) {
 	}
 
 	// Set port parameters
-	if port.SetMode(mode) != nil {
+	if err := port.SetMode(mode); err != nil {
 		port.Close()
-		return nil, &PortError{code: InvalidSerialPort}
+		return nil, err
 	}
 
 	params := &dcb{}
