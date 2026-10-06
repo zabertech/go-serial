@@ -18,8 +18,8 @@ type PortDetails struct {
 	VID          string
 	PID          string
 	SerialNumber string
-	// LatencyTimer is the FTDI latency timer of the port, or nil if it is not
-	// available (non-FTDI device, or unsupported OS such as macOS).
+	// LatencyTimer is the FTDI latency timer of the port, only available on FTDI devices on
+	// Windows and Linux.
 	LatencyTimer *time.Duration
 }
 

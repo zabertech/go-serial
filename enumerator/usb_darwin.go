@@ -40,14 +40,14 @@ func nativeGetDetailedPortsList() ([]*PortDetails, error) {
 		if err != nil {
 			return nil, &PortEnumerationError{causedBy: err}
 		}
-		ports = append(ports, port)
+		if fileExists(port.Name) {
+			ports = append(ports, port)
+		}
 
-		if dialinName, err := entry.GetStringProperty("IODialinDevice"); err == nil {
-			if _, err := os.Stat(dialinName); err == nil {
-				dialin := *port
-				dialin.Name = dialinName
-				ports = append(ports, &dialin)
-			}
+		if dialinName, err := entry.GetStringProperty("IODialinDevice"); err == nil && fileExists(dialinName) {
+			dialin := *port
+			dialin.Name = dialinName
+			ports = append(ports, &dialin)
 		}
 	}
 	slices.SortFunc(ports, func(a, b *PortDetails) int {
@@ -56,11 +56,16 @@ func nativeGetDetailedPortsList() ([]*PortDetails, error) {
 	return ports, nil
 }
 
+func fileExists(name string) bool {
+	_, err := os.Stat(name)
+	return err == nil
+}
+
 func extractPortInfo(service io_registry_entry_t) (*PortDetails, error) {
 	port := &PortDetails{}
 	// If called too early the port may still not be ready or fully enumerated
 	// so we retry 5 times before returning error.
-	for retries := 5; retries > 0; retries-- {
+	for retries := 4; retries >= 0; retries-- {
 		name, err := service.GetStringProperty("IOCalloutDevice")
 		if err == nil {
 			port.Name = name
