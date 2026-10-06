@@ -132,7 +132,7 @@ func (port *unixPort) ResetOutputBuffer() error {
 func (port *unixPort) SetMode(mode *Mode) error {
 	settings, err := port.getTermSettings()
 	if err != nil {
-		return err
+		return &PortError{code: InvalidSerialPort, causedBy: err}
 	}
 	customBaudrate, err := setTermSettingsBaudrate(mode.BaudRate, settings)
 	if err != nil {
@@ -152,7 +152,13 @@ func (port *unixPort) SetMode(mode *Mode) error {
 	} else {
 		port.customBaudrate = 0
 	}
-	return port.setTermSettings(settings)
+	if err := port.setTermSettings(settings); err != nil {
+		if _, ok := err.(*PortError); ok {
+			return err
+		}
+		return &PortError{code: InvalidSerialPort, causedBy: err}
+	}
+	return nil
 }
 
 func (port *unixPort) SetDTR(dtr bool) error {
@@ -469,7 +475,10 @@ func (port *unixPort) setTermSettings(settings *unix.Termios) error {
 	if err := ioctl(port.handle, ioctlTcsetattr, uintptr(unsafe.Pointer(settings))); err != nil {
 		return err
 	}
-	return port.setCustomBaudrate(port.customBaudrate)
+	if err := port.setCustomBaudrate(port.customBaudrate); err != nil {
+		return &PortError{code: InvalidSpeed, causedBy: err}
+	}
+	return nil
 }
 
 func (port *unixPort) getModemBitsStatus() (int, error) {
