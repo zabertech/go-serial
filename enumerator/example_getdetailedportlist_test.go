@@ -28,5 +28,8 @@ func ExampleGetDetailedPortsList() {
 			fmt.Printf("   USB ID     %s:%s\n", port.VID, port.PID)
 			fmt.Printf("   USB serial %s\n", port.SerialNumber)
 		}
+		if port.LatencyTimer != nil {
+			fmt.Printf("   Latency timer %s\n", *port.LatencyTimer)
+		}
 	}
 }

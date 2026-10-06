@@ -6,6 +6,8 @@
 
 package enumerator
 
+import "time"
+
 //go:generate go run golang.org/x/sys/windows/mkwinsyscall -output syscall_windows.go usb_windows.go
 
 // PortDetails contains detailed information about USB serial port.
@@ -16,6 +18,9 @@ type PortDetails struct {
 	VID          string
 	PID          string
 	SerialNumber string
+	// LatencyTimer is the FTDI latency timer of the port, or nil if it is not
+	// available (non-FTDI device, or unsupported OS such as macOS).
+	LatencyTimer *time.Duration
 }
 
 // GetDetailedPortsList retrieve ports details like USB VID/PID.
