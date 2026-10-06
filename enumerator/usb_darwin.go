@@ -14,6 +14,9 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"os"
+	"slices"
+	"strings"
 	"time"
 	"unsafe"
 )
@@ -32,12 +35,24 @@ func nativeGetDetailedPortsList() ([]*PortDetails, error) {
 	}()
 
 	for _, service := range services {
-		port, err := extractPortInfo(io_registry_entry_t(service))
+		entry := io_registry_entry_t(service)
+		port, err := extractPortInfo(entry)
 		if err != nil {
 			return nil, &PortEnumerationError{causedBy: err}
 		}
 		ports = append(ports, port)
+
+		if dialinName, err := entry.GetStringProperty("IODialinDevice"); err == nil {
+			if _, err := os.Stat(dialinName); err == nil {
+				dialin := *port
+				dialin.Name = dialinName
+				ports = append(ports, &dialin)
+			}
+		}
 	}
+	slices.SortFunc(ports, func(a, b *PortDetails) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 	return ports, nil
 }
 
