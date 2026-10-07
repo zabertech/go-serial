@@ -65,9 +65,9 @@ func GetPortsList() ([]string, error) {
 
 // Mode describes a serial port configuration.
 //
-// On Linux and the BSDs, BaudRate must be one of the standard termios
-// baudrates (e.g. 9600, 115200, 460800, 921600). On Windows and macOS any
-// positive baudrate is passed to the driver, which may reject it.
+// On Linux, BaudRate must be one of the standard termios baudrates (e.g. 9600,
+// 115200, 460800, 921600). On Windows and macOS any positive baudrate is passed
+// to the driver, which may reject it.
 type Mode struct {
 	BaudRate int      // The serial port bitrate (aka Baudrate)
 	DataBits int      // Size of the character (must be 5, 6, 7 or 8)

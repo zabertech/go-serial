@@ -6,7 +6,11 @@
 
 package serial
 
-import "golang.org/x/sys/unix"
+import (
+	"math"
+
+	"golang.org/x/sys/unix"
+)
 
 const devFolder = "/dev"
 const regexFilter = "^(cu|tty)\\..*"
@@ -23,7 +27,7 @@ const ioctlIOSSIOSPEED = 0x80045402
 func setTermSettingsBaudrate(speed int, settings *termSettings) error {
 	baudrate, ok := baudrateMap[speed]
 	if !ok {
-		if speed <= 0 {
+		if speed <= 0 || speed > math.MaxInt32 {
 			return &PortError{code: InvalidSpeed}
 		}
 		settings.customBaudrate = speed
