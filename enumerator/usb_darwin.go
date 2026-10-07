@@ -45,10 +45,10 @@ func nativeGetDetailedPortsList() ([]*PortDetails, error) {
 			ports = append(ports, port)
 		}
 
-		if dialinName, err := entry.GetStringProperty("IODialinDevice"); err == nil && fileExists(dialinName) {
-			dialin := *port
-			dialin.Name = dialinName
-			ports = append(ports, &dialin)
+		if ttyName, err := entry.GetStringProperty("IODialinDevice"); err == nil && fileExists(ttyName) {
+			ttyPort := *port
+			ttyPort.Name = ttyName
+			ports = append(ports, &ttyPort)
 		}
 	}
 	slices.SortFunc(ports, func(a, b *PortDetails) int {
