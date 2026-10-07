@@ -28,8 +28,13 @@ type unixPort struct {
 	closeSignal *unixutils.Pipe
 	isClosed    bool
 
-	// customBaudrate is the baudrate set with setCustomBaudrate after every
-	// termios update, or 0 if a standard baudrate is used
+	// custom baudrate currently applied, or 0 if none
+	customBaudrate int
+}
+
+type termSettings struct {
+	termios unix.Termios
+	// set with setCustomBaudrate after the termios, or 0 if the speed is in termios
 	customBaudrate int
 }
 
@@ -135,27 +140,19 @@ func (port *unixPort) SetMode(mode *Mode) error {
 		return err
 	}
 	previousSettings := *settings
-	previousCustomBaudrate := port.customBaudrate
-	customBaudrate, err := setTermSettingsBaudrate(mode.BaudRate, settings)
-	if err != nil {
+	if err := setTermSettingsBaudrate(mode.BaudRate, settings); err != nil {
 		return err
 	}
-	if err := setTermSettingsParity(mode.Parity, settings); err != nil {
+	if err := setTermSettingsParity(mode.Parity, &settings.termios); err != nil {
 		return err
 	}
-	if err := setTermSettingsDataBits(mode.DataBits, settings); err != nil {
+	if err := setTermSettingsDataBits(mode.DataBits, &settings.termios); err != nil {
 		return err
 	}
-	if err := setTermSettingsStopBits(mode.StopBits, settings); err != nil {
+	if err := setTermSettingsStopBits(mode.StopBits, &settings.termios); err != nil {
 		return err
-	}
-	if customBaudrate {
-		port.customBaudrate = mode.BaudRate
-	} else {
-		port.customBaudrate = 0
 	}
 	if err := port.setTermSettings(settings); err != nil {
-		port.customBaudrate = previousCustomBaudrate
 		_ = port.setTermSettings(&previousSettings)
 		return err
 	}
@@ -236,10 +233,10 @@ func nativeOpen(portName string, mode *Mode) (*unixPort, error) {
 	}
 
 	// Set raw mode
-	setRawMode(settings)
+	setRawMode(&settings.termios)
 
 	// Explicitly disable RTS/CTS flow control
-	setTermSettingsCtsRts(false, settings)
+	setTermSettingsCtsRts(false, &settings.termios)
 
 	if err := port.setTermSettings(settings); err != nil {
 		port.Close()
@@ -322,26 +319,23 @@ func nativeGetPortsList() ([]string, error) {
 // ioctl when a custom baudrate is in use
 const customBaudratePlaceholder = 9600
 
-// setTermSettingsBaudrate sets the requested baudrate in settings. If the
-// baudrate is not a standard one but the platform supports custom baudrates,
-// a placeholder baudrate is set and custom is true: the caller must then apply
-// the real baudrate with setCustomBaudrate after updating the termios.
-func setTermSettingsBaudrate(speed int, settings *unix.Termios) (custom bool, err error) {
+func setTermSettingsBaudrate(speed int, settings *termSettings) error {
 	baudrate, ok := baudrateMap[speed]
 	if !ok {
 		if !customBaudrateSupported || speed <= 0 {
-			return false, &PortError{code: InvalidSpeed}
+			return &PortError{code: InvalidSpeed}
 		}
-		baudrate = baudrateMap[customBaudratePlaceholder]
-		custom = true
+		settings.customBaudrate = speed
+		return nil
 	}
+	settings.customBaudrate = 0
 	// Only Linux encodes the speed in Cflag; elsewhere tcCBAUD is 0 and the
 	// speed is set through Ispeed/Ospeed alone.
-	settings.Cflag &^= tcCBAUD
-	settings.Cflag |= baudrate & tcCBAUD
-	settings.Ispeed = toTermiosSpeedType(baudrate)
-	settings.Ospeed = toTermiosSpeedType(baudrate)
-	return custom, nil
+	settings.termios.Cflag &^= tcCBAUD
+	settings.termios.Cflag |= baudrate & tcCBAUD
+	settings.termios.Ispeed = toTermiosSpeedType(baudrate)
+	settings.termios.Ospeed = toTermiosSpeedType(baudrate)
+	return nil
 }
 
 func setTermSettingsParity(parity Parity, settings *unix.Termios) error {
@@ -457,31 +451,32 @@ func setRawMode(settings *unix.Termios) {
 
 // native syscall wrapper functions
 
-func (port *unixPort) getTermSettings() (*unix.Termios, error) {
-	settings := &unix.Termios{}
-	if err := ioctl(port.handle, ioctlTcgetattr, uintptr(unsafe.Pointer(settings))); err != nil {
+func (port *unixPort) getTermSettings() (*termSettings, error) {
+	settings := &termSettings{customBaudrate: port.customBaudrate}
+	if err := ioctl(port.handle, ioctlTcgetattr, uintptr(unsafe.Pointer(&settings.termios))); err != nil {
 		return nil, &PortError{code: InvalidSerialPort, causedBy: err}
 	}
 	return settings, nil
 }
 
-func (port *unixPort) setTermSettings(settings *unix.Termios) error {
-	if port.customBaudrate != 0 {
+func (port *unixPort) setTermSettings(settings *termSettings) error {
+	termios := settings.termios
+	if settings.customBaudrate != 0 {
 		// The custom baudrate read back from the port may be rejected by the
 		// termios ioctl, and is reset by it anyway: set a placeholder, then
 		// re-apply the custom baudrate.
-		if _, err := setTermSettingsBaudrate(customBaudratePlaceholder, settings); err != nil {
-			return err
-		}
+		termios.Ispeed = toTermiosSpeedType(baudrateMap[customBaudratePlaceholder])
+		termios.Ospeed = toTermiosSpeedType(baudrateMap[customBaudratePlaceholder])
 	}
-	if err := ioctl(port.handle, ioctlTcsetattr, uintptr(unsafe.Pointer(settings))); err != nil {
+	if err := ioctl(port.handle, ioctlTcsetattr, uintptr(unsafe.Pointer(&termios))); err != nil {
 		return &PortError{code: InvalidSerialPort, causedBy: err}
 	}
-	if port.customBaudrate != 0 {
-		if err := port.setCustomBaudrate(port.customBaudrate); err != nil {
+	if settings.customBaudrate != 0 {
+		if err := port.setCustomBaudrate(settings.customBaudrate); err != nil {
 			return &PortError{code: InvalidSpeed, causedBy: err}
 		}
 	}
+	port.customBaudrate = settings.customBaudrate
 	return nil
 }
 
