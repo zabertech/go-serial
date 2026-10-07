@@ -57,6 +57,21 @@ const ioctlTcgetattr = unix.TIOCGETA
 const ioctlTcsetattr = unix.TIOCSETA
 const ioctlTcflsh = unix.TIOCFLUSH
 
+func setTermSettingsBaudrate(speed int, settings *termSettings) error {
+	baudrate, ok := baudrateMap[speed]
+	if !ok {
+		return &PortError{code: InvalidSpeed}
+	}
+	settings.termios.Ispeed = toTermiosSpeedType(baudrate)
+	settings.termios.Ospeed = toTermiosSpeedType(baudrate)
+	return nil
+}
+
+// Never called: custom baudrates are only supported on darwin
+func (port *unixPort) setCustomBaudrate(speed int) error {
+	return &PortError{code: InvalidSpeed}
+}
+
 func toTermiosSpeedType(speed uint32) int32 {
 	return int32(speed)
 }
