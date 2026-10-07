@@ -53,17 +53,21 @@ const tcCRTS_IFLOW uint32 = 0x00020000
 
 const tcCRTSCTS uint32 = tcCCTS_OFLOW
 
-// tcCBAUD is the mask of the baudrate bits in Cflag: the baudrate is stored
-// only in Ispeed/Ospeed, so no Cflag bits are used
-const tcCBAUD uint32 = 0
-
 const ioctlTcgetattr = unix.TIOCGETA
 const ioctlTcsetattr = unix.TIOCSETA
 const ioctlTcflsh = unix.TIOCFLUSH
 
-// Only the baudrates in baudrateMap are supported
-const customBaudrateSupported = false
+func setTermSettingsBaudrate(speed int, settings *termSettings) error {
+	baudrate, ok := baudrateMap[speed]
+	if !ok {
+		return &PortError{code: InvalidSpeed}
+	}
+	settings.termios.Ispeed = toTermiosSpeedType(baudrate)
+	settings.termios.Ospeed = toTermiosSpeedType(baudrate)
+	return nil
+}
 
+// Never called: custom baudrates are only supported on darwin
 func (port *unixPort) setCustomBaudrate(speed int) error {
 	return &PortError{code: InvalidSpeed}
 }

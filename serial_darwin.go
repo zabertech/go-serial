@@ -15,15 +15,25 @@ const ioctlTcgetattr = unix.TIOCGETA
 const ioctlTcsetattr = unix.TIOCSETA
 const ioctlTcflsh = unix.TIOCFLUSH
 
-// tcCBAUD is the mask of the baudrate bits in Cflag: the baudrate is stored
-// only in Ispeed/Ospeed, so no Cflag bits are used
-const tcCBAUD = 0
-
 // IOSSIOSPEED from IOKit/serial/ioss.h, used to set baudrates that are not
 // accepted by TIOCSETA (anything above 230400)
 const ioctlIOSSIOSPEED = 0x80045402
 
-const customBaudrateSupported = true
+// Baudrates not in baudrateMap are applied with setCustomBaudrate
+func setTermSettingsBaudrate(speed int, settings *termSettings) error {
+	baudrate, ok := baudrateMap[speed]
+	if !ok {
+		if speed <= 0 {
+			return &PortError{code: InvalidSpeed}
+		}
+		settings.customBaudrate = speed
+		return nil
+	}
+	settings.customBaudrate = 0
+	settings.termios.Ispeed = toTermiosSpeedType(baudrate)
+	settings.termios.Ospeed = toTermiosSpeedType(baudrate)
+	return nil
+}
 
 func (port *unixPort) setCustomBaudrate(speed int) error {
 	return unix.IoctlSetPointerInt(port.handle, ioctlIOSSIOSPEED, speed)

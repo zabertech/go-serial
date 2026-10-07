@@ -60,16 +60,23 @@ const tcIUCLC = unix.IUCLC
 
 const tcCRTSCTS uint32 = unix.CRTSCTS
 
-// tcCBAUD is the mask of the baudrate bits in Cflag
-const tcCBAUD uint32 = unix.CBAUD
-
 const ioctlTcgetattr = unix.TCGETS
 const ioctlTcsetattr = unix.TCSETS
 const ioctlTcflsh = unix.TCFLSH
 
-// Only the baudrates in baudrateMap are supported
-const customBaudrateSupported = false
+func setTermSettingsBaudrate(speed int, settings *termSettings) error {
+	baudrate, ok := baudrateMap[speed]
+	if !ok {
+		return &PortError{code: InvalidSpeed}
+	}
+	settings.termios.Cflag &^= unix.CBAUD
+	settings.termios.Cflag |= baudrate
+	settings.termios.Ispeed = toTermiosSpeedType(baudrate)
+	settings.termios.Ospeed = toTermiosSpeedType(baudrate)
+	return nil
+}
 
+// Never called: custom baudrates are only supported on darwin
 func (port *unixPort) setCustomBaudrate(speed int) error {
 	return &PortError{code: InvalidSpeed}
 }

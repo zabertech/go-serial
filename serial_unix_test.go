@@ -3,6 +3,7 @@
 package serial
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,11 @@ func TestSetTermSettingsBaudrate(t *testing.T) {
 			require.Equal(t, 0, settings.customBaudrate, "baudrate %d", speed)
 			require.Equal(t, toTermiosSpeedType(expected), settings.termios.Ispeed, "baudrate %d", speed)
 			require.Equal(t, toTermiosSpeedType(expected), settings.termios.Ospeed, "baudrate %d", speed)
-			require.Equal(t, otherCflags|(expected&tcCBAUD), settings.termios.Cflag, "baudrate %d", speed)
+			want := unix.Termios{Cflag: otherCflags}
+			if runtime.GOOS == "linux" {
+				want.Cflag |= expected
+			}
+			require.Equal(t, want.Cflag, settings.termios.Cflag, "baudrate %d", speed)
 		} else {
 			require.Equal(t, speed, settings.customBaudrate, "baudrate %d", speed)
 			require.Equal(t, unix.Termios{Cflag: otherCflags}, settings.termios, "baudrate %d", speed)
@@ -35,13 +40,17 @@ func TestSetTermSettingsBaudrateReplacesPrevious(t *testing.T) {
 	require.NoError(t, setTermSettingsBaudrate(921600, settings))
 	require.NoError(t, setTermSettingsBaudrate(9600, settings))
 	require.Equal(t, 0, settings.customBaudrate)
-	require.Equal(t, baudrateMap[9600]&tcCBAUD, settings.termios.Cflag)
+	if runtime.GOOS == "linux" {
+		require.Equal(t, baudrateMap[9600], settings.termios.Cflag)
+	} else {
+		require.Zero(t, settings.termios.Cflag)
+	}
 	require.Equal(t, toTermiosSpeedType(baudrateMap[9600]), settings.termios.Ispeed)
 }
 
 func TestSetTermSettingsBaudrateInvalid(t *testing.T) {
 	invalid := []int{-1}
-	if !customBaudrateSupported {
+	if runtime.GOOS == "linux" {
 		invalid = append(invalid, 12345)
 	}
 	for _, speed := range invalid {

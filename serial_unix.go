@@ -319,25 +319,6 @@ func nativeGetPortsList() ([]string, error) {
 // ioctl when a custom baudrate is in use
 const customBaudratePlaceholder = 9600
 
-func setTermSettingsBaudrate(speed int, settings *termSettings) error {
-	baudrate, ok := baudrateMap[speed]
-	if !ok {
-		if !customBaudrateSupported || speed <= 0 {
-			return &PortError{code: InvalidSpeed}
-		}
-		settings.customBaudrate = speed
-		return nil
-	}
-	settings.customBaudrate = 0
-	// Only Linux encodes the speed in Cflag; elsewhere tcCBAUD is 0 and the
-	// speed is set through Ispeed/Ospeed alone.
-	settings.termios.Cflag &^= tcCBAUD
-	settings.termios.Cflag |= baudrate & tcCBAUD
-	settings.termios.Ispeed = toTermiosSpeedType(baudrate)
-	settings.termios.Ospeed = toTermiosSpeedType(baudrate)
-	return nil
-}
-
 func setTermSettingsParity(parity Parity, settings *unix.Termios) error {
 	switch parity {
 	case NoParity:
