@@ -9,6 +9,7 @@ package enumerator
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -168,10 +169,11 @@ func retrievePortSettingsFromDevInfo(device *deviceInfo) (*PortDetails, error) {
 	}
 	details := &PortDetails{Name: syscall.UTF16ToString(name[:])}
 
-	// Only written by the FTDI VCP driver.
-	if ms, _, err := registry.Key(h).GetIntegerValue("LatencyTimer"); err == nil {
-		latency := time.Duration(ms) * time.Millisecond
-		details.LatencyTimer = &latency
+	if id, err := device.getInstanceID(); err == nil && strings.HasPrefix(id, "FTDIBUS") {
+		if ms, _, err := registry.Key(h).GetIntegerValue("LatencyTimer"); err == nil {
+			latency := time.Duration(ms) * time.Millisecond
+			details.LatencyTimer = &latency
+		}
 	}
 	return details, nil
 }
