@@ -37,8 +37,9 @@ func nativeGetDetailedPortsList() ([]*PortDetails, error) {
 	for _, service := range services {
 		entry := io_registry_entry_t(service)
 		port, err := extractPortInfo(entry)
+		// Leave out a port that isn't fully enumerated yet instead of failing the whole list.
 		if err != nil {
-			return nil, &PortEnumerationError{causedBy: err}
+			continue
 		}
 		if fileExists(port.Name) {
 			ports = append(ports, port)
@@ -57,8 +58,8 @@ func nativeGetDetailedPortsList() ([]*PortDetails, error) {
 }
 
 func fileExists(name string) bool {
-	_, err := os.Stat(name)
-	return err == nil
+	info, err := os.Stat(name)
+	return err == nil && !info.IsDir()
 }
 
 func extractPortInfo(service io_registry_entry_t) (*PortDetails, error) {
