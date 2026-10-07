@@ -335,9 +335,9 @@ func setTermSettingsBaudrate(speed int, settings *unix.Termios) (custom bool, er
 		baudrate = baudrateMap[customBaudratePlaceholder]
 		custom = true
 	}
-	// revert old baudrate
+	// Only Linux encodes the speed in Cflag; elsewhere tcCBAUD is 0 and the
+	// speed is set through Ispeed/Ospeed alone.
 	settings.Cflag &^= tcCBAUD
-	// set new baudrate
 	settings.Cflag |= baudrate & tcCBAUD
 	settings.Ispeed = toTermiosSpeedType(baudrate)
 	settings.Ospeed = toTermiosSpeedType(baudrate)
