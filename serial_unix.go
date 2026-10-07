@@ -134,6 +134,8 @@ func (port *unixPort) SetMode(mode *Mode) error {
 	if err != nil {
 		return err
 	}
+	previousSettings := *settings
+	previousCustomBaudrate := port.customBaudrate
 	customBaudrate, err := setTermSettingsBaudrate(mode.BaudRate, settings)
 	if err != nil {
 		return err
@@ -152,7 +154,12 @@ func (port *unixPort) SetMode(mode *Mode) error {
 	} else {
 		port.customBaudrate = 0
 	}
-	return port.setTermSettings(settings)
+	if err := port.setTermSettings(settings); err != nil {
+		port.customBaudrate = previousCustomBaudrate
+		_ = port.setTermSettings(&previousSettings)
+		return err
+	}
+	return nil
 }
 
 func (port *unixPort) SetDTR(dtr bool) error {
