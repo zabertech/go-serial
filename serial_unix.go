@@ -132,7 +132,7 @@ func (port *unixPort) ResetOutputBuffer() error {
 func (port *unixPort) SetMode(mode *Mode) error {
 	settings, err := port.getTermSettings()
 	if err != nil {
-		return &PortError{code: InvalidSerialPort, causedBy: err}
+		return err
 	}
 	customBaudrate, err := setTermSettingsBaudrate(mode.BaudRate, settings)
 	if err != nil {
@@ -152,13 +152,7 @@ func (port *unixPort) SetMode(mode *Mode) error {
 	} else {
 		port.customBaudrate = 0
 	}
-	if err := port.setTermSettings(settings); err != nil {
-		if _, ok := err.(*PortError); ok {
-			return err
-		}
-		return &PortError{code: InvalidSerialPort, causedBy: err}
-	}
-	return nil
+	return port.setTermSettings(settings)
 }
 
 func (port *unixPort) SetDTR(dtr bool) error {
@@ -231,7 +225,7 @@ func nativeOpen(portName string, mode *Mode) (*unixPort, error) {
 	settings, err := port.getTermSettings()
 	if err != nil {
 		port.Close()
-		return nil, &PortError{code: InvalidSerialPort}
+		return nil, err
 	}
 
 	// Set raw mode
@@ -240,9 +234,9 @@ func nativeOpen(portName string, mode *Mode) (*unixPort, error) {
 	// Explicitly disable RTS/CTS flow control
 	setTermSettingsCtsRts(false, settings)
 
-	if port.setTermSettings(settings) != nil {
+	if err := port.setTermSettings(settings); err != nil {
 		port.Close()
-		return nil, &PortError{code: InvalidSerialPort}
+		return nil, err
 	}
 
 	_ = unix.SetNonblock(handle, false)
@@ -458,25 +452,28 @@ func setRawMode(settings *unix.Termios) {
 
 func (port *unixPort) getTermSettings() (*unix.Termios, error) {
 	settings := &unix.Termios{}
-	err := ioctl(port.handle, ioctlTcgetattr, uintptr(unsafe.Pointer(settings)))
-	return settings, err
+	if err := ioctl(port.handle, ioctlTcgetattr, uintptr(unsafe.Pointer(settings))); err != nil {
+		return nil, &PortError{code: InvalidSerialPort, causedBy: err}
+	}
+	return settings, nil
 }
 
 func (port *unixPort) setTermSettings(settings *unix.Termios) error {
-	if port.customBaudrate == 0 {
-		return ioctl(port.handle, ioctlTcsetattr, uintptr(unsafe.Pointer(settings)))
-	}
-	// The custom baudrate read back from the port may be rejected by the
-	// termios ioctl, and is reset by it anyway: set a placeholder, then
-	// re-apply the custom baudrate.
-	if _, err := setTermSettingsBaudrate(customBaudratePlaceholder, settings); err != nil {
-		return err
+	if port.customBaudrate != 0 {
+		// The custom baudrate read back from the port may be rejected by the
+		// termios ioctl, and is reset by it anyway: set a placeholder, then
+		// re-apply the custom baudrate.
+		if _, err := setTermSettingsBaudrate(customBaudratePlaceholder, settings); err != nil {
+			return err
+		}
 	}
 	if err := ioctl(port.handle, ioctlTcsetattr, uintptr(unsafe.Pointer(settings))); err != nil {
-		return err
+		return &PortError{code: InvalidSerialPort, causedBy: err}
 	}
-	if err := port.setCustomBaudrate(port.customBaudrate); err != nil {
-		return &PortError{code: InvalidSpeed, causedBy: err}
+	if port.customBaudrate != 0 {
+		if err := port.setCustomBaudrate(port.customBaudrate); err != nil {
+			return &PortError{code: InvalidSpeed, causedBy: err}
+		}
 	}
 	return nil
 }
