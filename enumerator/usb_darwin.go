@@ -14,6 +14,9 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"os"
+	"slices"
+	"strings"
 	"time"
 	"unsafe"
 )
@@ -32,20 +35,38 @@ func nativeGetDetailedPortsList() ([]*PortDetails, error) {
 	}()
 
 	for _, service := range services {
-		port, err := extractPortInfo(io_registry_entry_t(service))
+		entry := io_registry_entry_t(service)
+		port, err := extractPortInfo(entry)
+		// Leave out a port that isn't fully enumerated yet instead of failing the whole list.
 		if err != nil {
-			return nil, &PortEnumerationError{causedBy: err}
+			continue
 		}
-		ports = append(ports, port)
+		if fileExists(port.Name) {
+			ports = append(ports, port)
+		}
+
+		if ttyName, err := entry.GetStringProperty("IODialinDevice"); err == nil && fileExists(ttyName) {
+			ttyPort := *port
+			ttyPort.Name = ttyName
+			ports = append(ports, &ttyPort)
+		}
 	}
+	slices.SortFunc(ports, func(a, b *PortDetails) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 	return ports, nil
+}
+
+func fileExists(name string) bool {
+	info, err := os.Stat(name)
+	return err == nil && !info.IsDir()
 }
 
 func extractPortInfo(service io_registry_entry_t) (*PortDetails, error) {
 	port := &PortDetails{}
 	// If called too early the port may still not be ready or fully enumerated
 	// so we retry 5 times before returning error.
-	for retries := 5; retries > 0; retries-- {
+	for retries := 4; retries >= 0; retries-- {
 		name, err := service.GetStringProperty("IOCalloutDevice")
 		if err == nil {
 			port.Name = name

@@ -12,7 +12,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zabertech/go-serial"
 )
@@ -54,8 +56,11 @@ func nativeGetPortDetails(portPath string) (*PortDetails, error) {
 	result := &PortDetails{Name: portPath}
 	switch subSystem {
 	case "usb-serial":
-		err := parseUSBSysFS(filepath.Dir(filepath.Dir(realDevicePath)), result)
-		return result, err
+		if err := parseUSBSysFS(filepath.Dir(filepath.Dir(realDevicePath)), result); err != nil {
+			return result, err
+		}
+		result.LatencyTimer = readLatencyTimer(realDevicePath)
+		return result, nil
 	case "usb":
 		err := parseUSBSysFS(filepath.Dir(realDevicePath), result)
 		return result, err
@@ -87,6 +92,19 @@ func parseUSBSysFS(usbDevicePath string, details *PortDetails) error {
 	details.PID = strings.ToUpper(pid)
 	details.SerialNumber = serial
 	return nil
+}
+
+func readLatencyTimer(usbSerialDevicePath string) *time.Duration {
+	value, err := readLine(filepath.Join(usbSerialDevicePath, "latency_timer"))
+	if err != nil {
+		return nil
+	}
+	ms, err := strconv.Atoi(value)
+	if err != nil {
+		return nil
+	}
+	latency := time.Duration(ms) * time.Millisecond
+	return &latency
 }
 
 func readLine(filename string) (string, error) {

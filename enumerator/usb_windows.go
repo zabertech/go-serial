@@ -9,10 +9,13 @@ package enumerator
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 func parseDeviceID(deviceID string, details *PortDetails) {
@@ -133,16 +136,14 @@ func nativeGetDetailedPortsList() ([]*PortDetails, error) {
 			if err != nil {
 				break
 			}
-			details := &PortDetails{}
-			portName, err := retrievePortNameFromDevInfo(device)
+			details, err := retrievePortSettingsFromDevInfo(device)
 			if err != nil {
 				continue
 			}
-			if len(portName) < 3 || portName[0:3] != "COM" {
+			if len(details.Name) < 3 || details.Name[0:3] != "COM" {
 				// Accept only COM ports
 				continue
 			}
-			details.Name = portName
 
 			if err := retrievePortDetailsFromDevInfo(device, details); err != nil {
 				return nil, &PortEnumerationError{causedBy: err}
@@ -153,10 +154,10 @@ func nativeGetDetailedPortsList() ([]*PortDetails, error) {
 	return res, nil
 }
 
-func retrievePortNameFromDevInfo(device *deviceInfo) (string, error) {
+func retrievePortSettingsFromDevInfo(device *deviceInfo) (*PortDetails, error) {
 	h, err := device.openDevRegKey(windows.DICS_FLAG_GLOBAL, 0, windows.DIREG_DEV, windows.KEY_READ)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer syscall.RegCloseKey(h)
 
@@ -164,9 +165,17 @@ func retrievePortNameFromDevInfo(device *deviceInfo) (string, error) {
 	nameP := (*byte)(unsafe.Pointer(&name[0]))
 	nameSize := uint32(len(name) * 2)
 	if err := syscall.RegQueryValueEx(h, syscall.StringToUTF16Ptr("PortName"), nil, nil, nameP, &nameSize); err != nil {
-		return "", err
+		return nil, err
 	}
-	return syscall.UTF16ToString(name[:]), nil
+	details := &PortDetails{Name: syscall.UTF16ToString(name[:])}
+
+	if id, err := device.getInstanceID(); err == nil && strings.HasPrefix(id, "FTDIBUS") {
+		if ms, _, err := registry.Key(h).GetIntegerValue("LatencyTimer"); err == nil {
+			latency := time.Duration(ms) * time.Millisecond
+			details.LatencyTimer = &latency
+		}
+	}
+	return details, nil
 }
 
 func retrievePortDetailsFromDevInfo(device *deviceInfo, details *PortDetails) error {
